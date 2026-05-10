@@ -100,7 +100,19 @@
     .user-item:hover .user-del { opacity: 1; }
     .user-del:hover { background: #fed7d7; color: #c53030; }
 
-    .add-user-form { display: flex; gap: 6px; }
+    .color-pick-wrap { position: relative; flex-shrink: 0; }
+    .color-pick-wrap input[type="color"] { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+    .color-pick-dot {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid rgba(0,0,0,.15);
+      transition: transform .15s;
+      flex-shrink: 0;
+    }
+    .color-pick-dot:hover { transform: scale(1.15); }
+
+    .add-user-form { display: flex; gap: 6px; align-items: center; }
     .add-user-form input {
       flex: 1;
       padding: 7px 10px;
@@ -439,6 +451,10 @@
         <div class="section-title">Usuarios</div>
         <div class="users-list" id="usersList"></div>
         <div class="add-user-form" style="margin-top:10px">
+          <div class="color-pick-wrap" title="Elige color">
+            <input type="color" id="newUserColor" value="#e05c6e">
+            <div class="color-pick-dot" id="newUserColorDot" style="background:#e05c6e" onclick="document.getElementById('newUserColor').click()"></div>
+          </div>
           <input id="newUserInput" type="text" placeholder="Nombre..." maxlength="24">
           <button onclick="addUser()">+</button>
         </div>
@@ -684,15 +700,54 @@ function getUserById(id) { return state.users.find(u => u.id === id); }
 // ═══════════════════════════════════════════════
 function addUser() {
   const input = document.getElementById('newUserInput');
-  const name = input.value.trim();
+  const name  = input.value.trim();
   if (!name) return;
-  const colorIndex = state.users.length % PALETTE.length;
-  const user = { id: uid(), name, color: PALETTE[colorIndex] };
+
+  const color = document.getElementById('newUserColor').value;
+  if (state.users.find(u => u.color.toLowerCase() === color.toLowerCase())) {
+    toast('Ese color ya lo usa otro usuario. Elige otro.'); return;
+  }
+
+  const user = { id: uid(), name, color };
   state.users.push(user);
   state.activeUserId = user.id;
   save();
   input.value = '';
+  // Avanzar el selector al siguiente color libre
+  syncNextFreeColor();
   render();
+}
+
+function syncNextFreeColor() {
+  const used = state.users.map(u => u.color.toLowerCase());
+  const next = PALETTE.find(c => !used.includes(c.toLowerCase())) || PALETTE[0];
+  const inp = document.getElementById('newUserColor');
+  const dot = document.getElementById('newUserColorDot');
+  if (inp) inp.value = next;
+  if (dot) dot.style.background = next;
+}
+
+function changeUserColor(id) {
+  const user = getUserById(id);
+  if (!user) return;
+  const inp = document.createElement('input');
+  inp.type  = 'color';
+  inp.value = user.color;
+  inp.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+  document.body.appendChild(inp);
+  inp.click();
+  inp.addEventListener('change', () => {
+    const newColor = inp.value;
+    if (state.users.find(u => u.id !== id && u.color.toLowerCase() === newColor.toLowerCase())) {
+      toast('Ese color ya lo usa otro usuario. Elige otro.');
+    } else {
+      user.color = newColor;
+      save();
+      render();
+    }
+    document.body.removeChild(inp);
+  });
+  inp.addEventListener('cancel', () => document.body.removeChild(inp));
 }
 
 function deleteUser(id) {
@@ -893,7 +948,8 @@ function renderUsers() {
     <div class="user-item ${u.id === state.activeUserId ? 'active' : ''}"
          style="color:${u.color}"
          onclick="setActiveUser('${u.id}')">
-      <div class="user-dot" style="background:${u.color}"></div>
+      <div class="user-dot" style="background:${u.color}" title="Cambiar color"
+           onclick="event.stopPropagation();changeUserColor('${u.id}')"></div>
       <span class="user-name" style="color:var(--text)">${u.name}</span>
       <span class="user-del" onclick="event.stopPropagation();deleteUser('${u.id}')">✕</span>
     </div>
@@ -1051,11 +1107,17 @@ document.getElementById('newUserInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') addUser();
 });
 
+document.getElementById('newUserColor').addEventListener('input', e => {
+  document.getElementById('newUserColorDot').style.background = e.target.value;
+});
+
 // ═══════════════════════════════════════════════
 // INIT — escucha Firebase en tiempo real
 // ═══════════════════════════════════════════════
 document.getElementById('calDays').innerHTML =
   '<div style="grid-column:1/-1;padding:40px;text-align:center;color:var(--text-muted);font-size:.9rem">Conectando…</div>';
+
+syncNextFreeColor();
 
 dataRef.on('value', snapshot => {
   const data = snapshot.val();
