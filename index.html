@@ -740,6 +740,8 @@ function saveRequest() {
 // CALENDAR CLICK
 // ═══════════════════════════════════════════════
 function onDayClick(ds) {
+  const dow = parseDate(ds).getDay();
+  if (dow === 0 || dow === 6) { toast('Los fines de semana no son días laborables.'); return; }
   if (!state.activeUserId) { toast('Selecciona primero un usuario.'); return; }
 
   if (!selectingStart) {
