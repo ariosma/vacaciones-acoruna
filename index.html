@@ -1003,12 +1003,15 @@ function renderCalendar() {
     container.appendChild(el);
   }
 
-  // Build a map: date → requests
+  // Build a map: date → requests (excluyendo findes y festivos)
   const reqMap = {};
   state.requests.forEach(r => {
     const s = parseDate(r.start), e = parseDate(r.end);
     for (let d = new Date(s); d <= e; d.setDate(d.getDate()+1)) {
+      const dow = d.getDay();
+      if (dow === 0 || dow === 6) continue;
       const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      if (HOLIDAYS[ds]) continue;
       if (!reqMap[ds]) reqMap[ds] = [];
       reqMap[ds].push(r);
     }
