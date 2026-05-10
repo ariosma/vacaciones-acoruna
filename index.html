@@ -770,7 +770,13 @@ function setActiveUser(id) {
 // REQUESTS
 // ═══════════════════════════════════════════════
 function deleteRequest(id) {
-  state.requests = state.requests.filter(r => r.id !== id);
+  const r = state.requests.find(x => x.id === id);
+  if (!r) return;
+  if (r.userId !== state.activeUserId) {
+    toast('Solo puedes eliminar tus propias solicitudes.');
+    return;
+  }
+  state.requests = state.requests.filter(x => x.id !== id);
   save();
   render();
 }
@@ -1070,6 +1076,7 @@ function renderRequests() {
     const user = getUserById(r.userId);
     if (!user) return '';
     const bd = businessDays(r.start, r.end);
+    const isOwner = r.userId === state.activeUserId;
     return `
       <div class="request-mini">
         <div class="req-color" style="background:${user.color}"></div>
@@ -1079,7 +1086,7 @@ function renderRequests() {
           <div class="req-dates">${bd} día${bd!==1?'s':''} laborable${bd!==1?'s':''}</div>
           ${r.note ? `<div class="req-dates" style="font-style:italic">${r.note}</div>` : ''}
         </div>
-        <span class="req-del" onclick="deleteRequest('${r.id}')">✕</span>
+        ${isOwner ? `<span class="req-del" onclick="deleteRequest('${r.id}')">✕</span>` : ''}
       </div>`;
   }).join('');
 }
@@ -1089,7 +1096,12 @@ function showReqDetail(id) {
   if (!r) return;
   const user = getUserById(r.userId);
   const bd = businessDays(r.start, r.end);
-  if (confirm(`${user?.name ?? '?'}\n${formatRange(r.start, r.end)}\n${bd} días laborables${r.note ? '\n'+r.note : ''}\n\n¿Eliminar esta solicitud?`)) {
+  const info = `${user?.name ?? '?'}\n${formatRange(r.start, r.end)}\n${bd} días laborables${r.note ? '\n'+r.note : ''}`;
+  if (r.userId !== state.activeUserId) {
+    alert(info);
+    return;
+  }
+  if (confirm(`${info}\n\n¿Eliminar esta solicitud?`)) {
     deleteRequest(id);
   }
 }
