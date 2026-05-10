@@ -356,6 +356,58 @@
     }
     .toast.show { transform: translateY(0); opacity: 1; }
 
+    /* ── Summary ── */
+    .summary-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: .82rem;
+    }
+    .summary-item:last-child { border-bottom: none; }
+    .summary-bar-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .summary-name { font-weight: 600; }
+    .summary-track {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .summary-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width .4s ease;
+    }
+    .summary-days {
+      font-weight: 700;
+      font-size: .8rem;
+      min-width: 28px;
+      text-align: right;
+    }
+    .summary-year-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 10px;
+    }
+    .summary-year-tab {
+      padding: 3px 9px;
+      border-radius: 6px;
+      font-size: .75rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-muted);
+      transition: background .15s, color .15s;
+    }
+    .summary-year-tab.active { background: #667eea; color: #fff; border-color: #667eea; }
+
     .no-user-warn {
       text-align: center;
       padding: 12px;
@@ -408,6 +460,11 @@
             Hoy
           </div>
         </div>
+      </div>
+
+      <div>
+        <div class="section-title">Días cogidos <span id="summaryYear" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+        <div id="summaryList"></div>
       </div>
 
       <div class="requests-section">
@@ -744,11 +801,71 @@ function nextMonth() {
 // ═══════════════════════════════════════════════
 // RENDER
 // ═══════════════════════════════════════════════
+let summaryYear = viewYear;
+
 function render() {
   renderUsers();
   renderCalendar();
   renderRequests();
   renderBadge();
+  renderSummary();
+}
+
+function renderSummary() {
+  const container = document.getElementById('summaryList');
+  if (state.users.length === 0) { container.innerHTML = ''; return; }
+
+  // Year tabs
+  const years = [...new Set(state.requests.flatMap(r => {
+    const ys = [];
+    for (let y = parseInt(r.start); y <= parseInt(r.end); y++) ys.push(y);
+    return ys;
+  }))].sort();
+  if (!years.includes(summaryYear)) summaryYear = viewYear;
+
+  const allYears = [...new Set([...years, viewYear])].sort();
+
+  const tabs = allYears.map(y =>
+    `<div class="summary-year-tab ${y === summaryYear ? 'active' : ''}" onclick="setSummaryYear(${y})">${y}</div>`
+  ).join('');
+
+  // Days per user for selected year
+  const totals = state.users.map(u => {
+    const days = state.requests
+      .filter(r => r.userId === u.id)
+      .reduce((acc, r) => {
+        // clip to summaryYear
+        const yStart = `${summaryYear}-01-01`;
+        const yEnd   = `${summaryYear}-12-31`;
+        const s = r.start < yStart ? yStart : r.start;
+        const e = r.end   > yEnd   ? yEnd   : r.end;
+        if (s > e) return acc;
+        return acc + businessDays(s, e);
+      }, 0);
+    return { user: u, days };
+  });
+
+  const max = Math.max(...totals.map(t => t.days), 1);
+
+  container.innerHTML = `
+    <div class="summary-year-tabs">${tabs}</div>
+    ${totals.map(({ user, days }) => `
+      <div class="summary-item">
+        <div class="user-dot" style="background:${user.color}"></div>
+        <div class="summary-bar-wrap">
+          <div class="summary-name">${user.name}</div>
+          <div class="summary-track">
+            <div class="summary-fill" style="width:${(days/max*100).toFixed(1)}%;background:${user.color}"></div>
+          </div>
+        </div>
+        <div class="summary-days" style="color:${user.color}">${days}d</div>
+      </div>`).join('')}
+  `;
+}
+
+function setSummaryYear(y) {
+  summaryYear = y;
+  renderSummary();
 }
 
 function renderUsers() {
