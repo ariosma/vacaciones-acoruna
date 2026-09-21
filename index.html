@@ -500,7 +500,7 @@
         <div id="activeBadge" class="active-user-badge" style="display:none"></div>
       </div>
       <div id="noUserWarn" class="no-user-warn" style="display:none">
-        Añade y selecciona un usuario para registrar vacaciones.
+        Escribe un nombre arriba y haz clic directamente en un día del calendario.
       </div>
       <div class="calendar">
         <div class="cal-weekdays">
@@ -808,10 +808,24 @@ async function saveRequest() {
 // ═══════════════════════════════════════════════
 // CALENDAR CLICK
 // ═══════════════════════════════════════════════
-function onDayClick(ds) {
+async function onDayClick(ds) {
   const dow = parseDate(ds).getDay();
   if (dow === 0 || dow === 6) { toast('Los fines de semana no son días laborables.'); return; }
-  if (!state.activeUserId) { toast('Selecciona primero un usuario.'); return; }
+
+  // Sin usuario activo: si hay un nombre escrito, crearlo (o seleccionarlo) al vuelo
+  if (!state.activeUserId) {
+    const input = document.getElementById('newUserInput');
+    const name  = input.value.trim();
+    if (!name) { toast('Escribe un nombre o selecciona un usuario.'); return; }
+    const existing = state.users.find(u => u.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      input.value = '';
+      setActiveUser(existing.id);
+    } else {
+      await addUser();
+      if (!state.activeUserId) return; // p.ej. color duplicado
+    }
+  }
 
   if (!selectingStart) {
     // First click — start selection
