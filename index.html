@@ -550,21 +550,12 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-// ── Firebase ──────────────────────────────────
-firebase.initializeApp({
-  apiKey: "AIzaSyAbdRwIwFXMbeTlVMhtgyBKs1jvBWHaZ4I",
-  authDomain: "calendario-vacas-coru.firebaseapp.com",
-  databaseURL: "https://calendario-vacas-coru-default-rtdb.firebaseio.com",
-  projectId: "calendario-vacas-coru",
-  storageBucket: "calendario-vacas-coru.firebasestorage.app",
-  messagingSenderId: "122037875379",
-  appId: "1:122037875379:web:d35e54415f6fdcfbb176c6",
-});
-const db      = firebase.database();
-const dataRef = db.ref('calendario');
+// ── Supabase ──────────────────────────────────
+const SUPABASE_URL      = 'https://olacubhivoqnitadkvei.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_hjNRUw6j4mSmBLJFak8-jA_jjb1uP-p';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ═══════════════════════════════════════════════
 // FESTIVOS — Galicia / A Coruña
@@ -636,14 +627,16 @@ let state = {
   activeUserId: localStorage.getItem('vac_activeUser') || null,
 };
 
-function save() {
-  // activeUserId es local (preferencia de dispositivo)
+// activeUserId es local (preferencia de dispositivo)
+function saveLocal() {
   localStorage.setItem('vac_activeUser', state.activeUserId || '');
-  // users y requests van a Firebase (compartido)
-  dataRef.set({
-    users:    state.users,
-    requests: state.requests,
-  });
+}
+
+// Mapeadores fila BD ↔ objeto de estado
+function userFromRow(u) { return { id: u.id, name: u.name, color: u.color }; }
+function requestFromRow(r) {
+  return { id: r.id, userId: r.user_id, start: r.start_date, end: r.end_date,
+           note: r.note || '', createdAt: Number(r.created_at) };
 }
 
 function uid() {
@@ -698,7 +691,7 @@ function getUserById(id) { return state.users.find(u => u.id === id); }
 // ═══════════════════════════════════════════════
 // USERS
 // ═══════════════════════════════════════════════
-function addUser() {
+async function addUser() {
   const input = document.getElementById('newUserInput');
   const name  = input.value.trim();
   if (!name) return;
@@ -709,9 +702,12 @@ function addUser() {
   }
 
   const user = { id: uid(), name, color };
+  const { error } = await sb.from('vac_users').insert(user);
+  if (error) { toast('Error guardando el usuario'); console.error(error); return; }
+
   state.users.push(user);
   state.activeUserId = user.id;
-  save();
+  saveLocal();
   input.value = '';
   // Avanzar el selector al siguiente color libre
   syncNextFreeColor();
@@ -736,52 +732,58 @@ function changeUserColor(id) {
   inp.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
   document.body.appendChild(inp);
   inp.click();
-  inp.addEventListener('change', () => {
+  inp.addEventListener('change', async () => {
     const newColor = inp.value;
     if (state.users.find(u => u.id !== id && u.color.toLowerCase() === newColor.toLowerCase())) {
       toast('Ese color ya lo usa otro usuario. Elige otro.');
     } else {
-      user.color = newColor;
-      save();
-      render();
+      const { error } = await sb.from('vac_users').update({ color: newColor }).eq('id', id);
+      if (error) { toast('Error actualizando el color'); console.error(error); }
+      else { user.color = newColor; render(); }
     }
     document.body.removeChild(inp);
   });
   inp.addEventListener('cancel', () => document.body.removeChild(inp));
 }
 
-function deleteUser(id) {
+async function deleteUser(id) {
   if (!confirm('¿Eliminar usuario y todas sus solicitudes?')) return;
+  // Las solicitudes se borran en cascada (ON DELETE CASCADE)
+  const { error } = await sb.from('vac_users').delete().eq('id', id);
+  if (error) { toast('Error eliminando el usuario'); console.error(error); return; }
+
   state.users = state.users.filter(u => u.id !== id);
   state.requests = state.requests.filter(r => r.userId !== id);
   if (state.activeUserId === id) state.activeUserId = state.users[0]?.id ?? null;
-  save();
+  saveLocal();
   render();
 }
 
 function setActiveUser(id) {
   state.activeUserId = id;
   selectingStart = null;
-  save();
+  saveLocal();
   render();
 }
 
 // ═══════════════════════════════════════════════
 // REQUESTS
 // ═══════════════════════════════════════════════
-function deleteRequest(id) {
+async function deleteRequest(id) {
   const r = state.requests.find(x => x.id === id);
   if (!r) return;
   if (r.userId !== state.activeUserId) {
     toast('Solo puedes eliminar tus propias solicitudes.');
     return;
   }
+  const { error } = await sb.from('vac_requests').delete().eq('id', id);
+  if (error) { toast('Error eliminando la solicitud'); console.error(error); return; }
+
   state.requests = state.requests.filter(x => x.id !== id);
-  save();
   render();
 }
 
-function saveRequest() {
+async function saveRequest() {
   const userId = document.getElementById('modalUser').value;
   const start  = document.getElementById('modalStart').value;
   const end    = document.getElementById('modalEnd').value;
@@ -790,8 +792,14 @@ function saveRequest() {
   if (!userId || !start || !end) { toast('Completa todos los campos.'); return; }
   if (start > end) { toast('La fecha de inicio no puede ser posterior al fin.'); return; }
 
-  state.requests.push({ id: uid(), userId, start, end, note, createdAt: Date.now() });
-  save();
+  const request = {
+    id: uid(), user_id: userId, start_date: start, end_date: end,
+    note, created_at: Date.now(),
+  };
+  const { error } = await sb.from('vac_requests').insert(request);
+  if (error) { toast('Error guardando la solicitud'); console.error(error); return; }
+
+  state.requests.push(requestFromRow(request));
   closeModal();
   render();
   toast('✅ Solicitud guardada');
@@ -1127,17 +1135,29 @@ document.getElementById('newUserColor').addEventListener('input', e => {
 });
 
 // ═══════════════════════════════════════════════
-// INIT — escucha Firebase en tiempo real
+// INIT — carga inicial + escucha Supabase en tiempo real
 // ═══════════════════════════════════════════════
 document.getElementById('calDays').innerHTML =
   '<div style="grid-column:1/-1;padding:40px;text-align:center;color:var(--text-muted);font-size:.9rem">Conectando…</div>';
 
 syncNextFreeColor();
 
-dataRef.on('value', snapshot => {
-  const data = snapshot.val();
-  state.users    = data?.users    || [];
-  state.requests = data?.requests || [];
+async function loadFromSupabase() {
+  const [{ data: users, error: usersError }, { data: requests, error: requestsError }] =
+    await Promise.all([
+      sb.from('vac_users').select('*'),
+      sb.from('vac_requests').select('*'),
+    ]);
+
+  if (usersError || requestsError) {
+    console.error(usersError || requestsError);
+    document.getElementById('calDays').innerHTML =
+      '<div style="grid-column:1/-1;padding:40px;text-align:center;color:var(--holiday-text);font-size:.9rem">Error conectando con Supabase. Revisa la URL y la anon key.</div>';
+    return;
+  }
+
+  state.users    = (users    || []).map(userFromRow);
+  state.requests = (requests || []).map(requestFromRow);
 
   // Si el usuario activo ya no existe, resetear
   if (state.activeUserId && !state.users.find(u => u.id === state.activeUserId)) {
@@ -1146,7 +1166,14 @@ dataRef.on('value', snapshot => {
   }
 
   render();
-});
+}
+
+loadFromSupabase();
+
+sb.channel('vacaciones')
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'vac_users' },    loadFromSupabase)
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'vac_requests' }, loadFromSupabase)
+  .subscribe();
 </script>
 
 </body>
